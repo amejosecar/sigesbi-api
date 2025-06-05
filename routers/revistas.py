@@ -1,73 +1,110 @@
-#sigesbi/routers/revistas.py
-# 
-
-# sigesbi/routers/revistas.py
-from fastapi import APIRouter, Depends, HTTPException
+# sigesbi-api/routers/revistas.py
+from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session, joinedload
 from database import get_db
 from models import Revista, MaterialBiblioteca
-from schemas import RevistaCreate, RevistaResponse
+from schemas import RevistaResponse
 from sqlalchemy.exc import IntegrityError
+from ..mongodb import insert_review, get_review, delete_review
+
 
 router = APIRouter()
 
 @router.post("/", response_model=RevistaResponse)
-def agregar_revista(revista_data: RevistaCreate, db: Session = Depends(get_db)):
+def agregar_revista(
+    codigo_inventario: int = Form(...),
+    titulo: str = Form(...),
+    autor: str = Form(...),
+    isbn: str = Form(None),
+    numero_edicion: int = Form(None),
+    fecha_publicacion: str = Form(None),
+    resena: str = Form(None),
+    db: Session = Depends(get_db)
+):
     """
-    Agrega una nueva revista a la biblioteca.
-    Si el registro en MaterialBiblioteca no existe, se crea usando los datos enviados.
+    Agrega una nueva revista a la biblioteca usando datos tipo formulario.
+    Almacena la reseña en MongoDB.
     """
-    material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=revista_data.codigo_inventario).first()
+    material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=codigo_inventario).first()
     if not material:
         material = MaterialBiblioteca(
-            codigo_inventario=revista_data.codigo_inventario,
-            titulo=revista_data.titulo,
-            autor=revista_data.autor,
+            codigo_inventario=codigo_inventario,
+            titulo=titulo,
+            autor=autor,
             tipo_material="Revista"
         )
         db.add(material)
         try:
             db.commit()
-        except IntegrityError as e:
+        except IntegrityError:
             db.rollback()
-            raise HTTPException(status_code=500, detail=f"Error al crear MaterialBiblioteca: {e}")
-        db.refresh(material)
+            raise HTTPException(status_code=500, detail="Error al crear el material")
     
-    revista_existente = db.query(Revista).filter_by(codigo_inventario=revista_data.codigo_inventario).first()
+    revista_existente = db.query(Revista).filter_by(codigo_inventario=codigo_inventario).first()
     if revista_existente:
         raise HTTPException(status_code=409, detail="Ya existe una revista con ese código de inventario")
     
-    nuevo_revista = Revista(**revista_data.dict(exclude={"titulo", "autor"}))
+    nuevo_revista = Revista(
+        codigo_inventario=codigo_inventario,
+        isbn=isbn,
+        numero_edicion=numero_edicion,
+        fecha_publicacion=fecha_publicacion
+    )
     db.add(nuevo_revista)
     try:
         db.commit()
-    except IntegrityError as e:
+    except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error al insertar la revista: {e}")
+        raise HTTPException(status_code=500, detail="Error al insertar la revista")
+    
     db.refresh(nuevo_revista)
-    return nuevo_revista
+    if resena:
+        insert_review("revista", codigo_inventario, resena)
+    revista_dict = nuevo_revista.__dict__
+    revista_dict["resena"] = get_review("revista", codigo_inventario)
+    return revista_dict
 
 @router.get("/", response_model=list[RevistaResponse])
 def listar_revistas(db: Session = Depends(get_db)):
+    """
+    Lista todas las revistas, incluyendo la reseña almacenada en MongoDB.
+    """
     revistas = db.query(Revista).options(joinedload(Revista.material)).all()
-    return revistas
+    result = []
+    for revista in revistas:
+        revista_dict = revista.__dict__
+        revista_dict["resena"] = get_review("revista", revista.codigo_inventario)
+        result.append(revista_dict)
+    return result
 
 @router.get("/{codigo_inventario}", response_model=RevistaResponse)
 def obtener_revista(codigo_inventario: int, db: Session = Depends(get_db)):
-    revista = db.query(Revista).options(joinedload(Revista.material)).filter_by(codigo_inventario=codigo_inventario).first()
+    """
+    Obtiene la información de una revista por su código de inventario,
+    incluyendo la reseña almacenada en MongoDB.
+    """
+    revista = db.query(Revista).options(joinedload(Revista.material))\
+                               .filter_by(codigo_inventario=codigo_inventario).first()
     if not revista:
         raise HTTPException(status_code=404, detail="Revista no encontrada")
-    return revista
+    revista_dict = revista.__dict__
+    revista_dict["resena"] = get_review("revista", codigo_inventario)
+    return revista_dict
 
 @router.delete("/{codigo_inventario}")
 def eliminar_revista(codigo_inventario: int, db: Session = Depends(get_db)):
+    """
+    Elimina una revista y su registro asociado en MaterialBiblioteca,
+    además elimina la reseña en MongoDB.
+    """
     revista = db.query(Revista).filter_by(codigo_inventario=codigo_inventario).first()
     if not revista:
         raise HTTPException(status_code=404, detail="Revista no encontrada")
+    
     material = revista.material
-    db.delete(revista)
-    db.commit()
     if material:
         db.delete(material)
-        db.commit()
+    db.delete(revista)
+    db.commit()
+    delete_review("revista", codigo_inventario)
     return {"message": "Revista y registro de material eliminado exitosamente"}
