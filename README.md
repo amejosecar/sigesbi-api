@@ -1,4 +1,3 @@
-# sigesbi-api
 # SiGesBi API
 
 **SiGesBi API** es un sistema de gestión de biblioteca desarrollado en FastAPI. Permite administrar diferentes tipos de materiales (libros, revistas, DVDs), gestionar usuarios y controlar préstamos de forma sencilla, rápida y segura.
