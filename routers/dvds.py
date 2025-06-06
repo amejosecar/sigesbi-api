@@ -1,10 +1,10 @@
 # sigesbi-api/routers/dvds.py
 from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session, joinedload
-from database import get_db
-from models import DVD, MaterialBiblioteca
-from schemas import DVDResponse
 from sqlalchemy.exc import IntegrityError
+from ..database import get_db
+from ..models import DVD, MaterialBiblioteca
+from ..schemas import DVDResponse
 from ..mongodb import insert_review, get_review, delete_review
 
 

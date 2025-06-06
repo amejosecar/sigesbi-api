@@ -1,9 +1,9 @@
 # sigesbi-api/routers/prestamos.py
 from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session
-from database import get_db
-from models import Prestamo, MaterialBiblioteca, Usuario
-from schemas import PrestamoResponse
+from ..database import get_db
+from ..models import Prestamo, MaterialBiblioteca, Usuario
+from ..schemas import PrestamoResponse
 from datetime import datetime
 
 router = APIRouter()

@@ -1,10 +1,10 @@
 # sigesbi-api/routers/revistas.py
 from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session, joinedload
-from database import get_db
-from models import Revista, MaterialBiblioteca
-from schemas import RevistaResponse
 from sqlalchemy.exc import IntegrityError
+from ..database import get_db
+from ..models import Revista, MaterialBiblioteca
+from ..schemas import RevistaResponse
 from ..mongodb import insert_review, get_review, delete_review
 
 

@@ -1,0 +1,1329 @@
+----------------------------------------
+# C:\americo\API\sigesbi_api\database.py
+# sigesbi-api/database.py
+# 
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
+import os
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv()
+
+# Configuración de la conexión a la base de datos
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sigesbi.db")
+
+engine = create_engine(DATABASE_URL, echo=False, future=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Dependencia para obtener la sesión de la base de datos
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\main.py
+## sigesbi-api/main.py
+# sigesbi-api/main.py
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from .routers import libros, revistas, dvds, usuarios, prestamos
+from .templates import templates
+
+app = FastAPI(
+    title="SiGesBi API",
+    description="Sistema de Gestión de Biblioteca con FastAPI",
+    version="1.0.0"
+)
+
+# Registrar los routers
+app.include_router(libros.router, prefix="/libros", tags=["Libros"])
+app.include_router(revistas.router, prefix="/revistas", tags=["Revistas"])
+app.include_router(dvds.router, prefix="/dvds", tags=["DVDs"])
+app.include_router(usuarios.router, prefix="/usuarios", tags=["Usuarios"])
+app.include_router(prestamos.router, prefix="/prestamos", tags=["Préstamos"])
+
+# Endpoint de bienvenida (opcional)
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request, "message": "Bienvenido a SiGesBi API"})
+
+# Endpoints para servir formularios HTML para cada modelo
+@app.get("/formulario-libros", response_class=HTMLResponse)
+def formulario_libros(request: Request):
+    return templates.TemplateResponse("libros.html", {"request": request})
+
+@app.get("/formulario-revistas", response_class=HTMLResponse)
+def formulario_revistas(request: Request):
+    return templates.TemplateResponse("revistas.html", {"request": request})
+
+@app.get("/formulario-dvds", response_class=HTMLResponse)
+def formulario_dvds(request: Request):
+    return templates.TemplateResponse("dvds.html", {"request": request})
+
+@app.get("/formulario-usuarios", response_class=HTMLResponse)
+def formulario_usuarios(request: Request):
+    return templates.TemplateResponse("usuarios.html", {"request": request})
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\models.py
+# sigesbi-api/models.py
+from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey, Float
+from sqlalchemy.orm import relationship
+from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime
+
+Base = declarative_base()
+
+class MaterialBiblioteca(Base):
+    __tablename__ = "material_biblioteca"
+    codigo_inventario = Column(Integer, primary_key=True, autoincrement=True)
+    titulo = Column(String, nullable=False)
+    autor = Column(String, nullable=False)
+    ubicacion = Column(String)
+    disponible = Column(Boolean, default=True)
+    tipo_material = Column(String, nullable=False)
+
+    # Relaciones
+    libro = relationship("Libro", uselist=False, back_populates="material")
+    revista = relationship("Revista", uselist=False, back_populates="material")
+    dvd = relationship("DVD", uselist=False, back_populates="material")
+    prestamos = relationship("Prestamo", back_populates="material", cascade="all, delete-orphan")
+
+class Libro(Base):
+    __tablename__ = "libro"
+    codigo_inventario = Column(Integer, ForeignKey("material_biblioteca.codigo_inventario"), primary_key=True)
+    isbn = Column(String)
+    numero_paginas = Column(Integer)
+    editorial = Column(String)
+    fecha_publicacion = Column(String)
+    edicion = Column(String)
+    idioma = Column(String)
+    peso_libro = Column(Float)
+    formato_libro = Column(String)
+    tipo_literatura = Column(String)
+    resena = Column(String)
+
+    material = relationship("MaterialBiblioteca", back_populates="libro")
+
+class Revista(Base):
+    __tablename__ = "revista"
+    codigo_inventario = Column(Integer, ForeignKey("material_biblioteca.codigo_inventario"), primary_key=True)
+    isbn = Column(String)
+    numero_edicion = Column(Integer)
+    fecha_publicacion = Column(String)
+
+    material = relationship("MaterialBiblioteca", back_populates="revista")
+
+class DVD(Base):
+    __tablename__ = "dvd"
+    codigo_inventario = Column(Integer, ForeignKey("material_biblioteca.codigo_inventario"), primary_key=True)
+    isbn = Column(String)
+    duracion = Column(Integer)
+    formato = Column(String)
+
+    material = relationship("MaterialBiblioteca", back_populates="dvd")
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+    usuario_id = Column(Integer, primary_key=True, autoincrement=True)
+    nombre = Column(String, nullable=False)
+    apellido = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True)
+    fecha_registro = Column(DateTime, default=datetime.now)
+
+    prestamos = relationship("Prestamo", back_populates="usuario", cascade="all, delete-orphan")
+
+class Prestamo(Base):
+    __tablename__ = "prestamos"
+    prestamo_id = Column(Integer, primary_key=True, autoincrement=True)
+    codigo_inventario = Column(Integer, ForeignKey("material_biblioteca.codigo_inventario"), nullable=False)
+    usuario_id = Column(Integer, ForeignKey("usuarios.usuario_id"), nullable=False)
+    fecha_prestamo = Column(DateTime, default=datetime.now)
+    fecha_devolucion = Column(DateTime)
+    devuelto = Column(Boolean, default=False)
+
+    usuario = relationship("Usuario", back_populates="prestamos")
+    material = relationship("MaterialBiblioteca", back_populates="prestamos")
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\schemas.py
+# sigesbi-api/schemas.py
+from pydantic import BaseModel, EmailStr
+from datetime import datetime
+from typing import Optional
+from fastapi import Form
+
+# 📚 Esquema para MaterialBiblioteca
+class MaterialBase(BaseModel):
+    titulo: str = Form(...)
+    autor: str = Form(...)
+    ubicacion: Optional[str] = Form(None)
+    tipo_material: str = Form(...)
+
+class MaterialCreate(MaterialBase):
+    disponible: Optional[bool] = Form(True)
+
+class MaterialResponse(MaterialBase):
+    codigo_inventario: int
+    disponible: bool
+
+    class Config:
+        from_attributes = True
+
+# 📖 Esquema para Libros
+class LibroBase(BaseModel):
+    isbn: Optional[str] = Form(None)
+    numero_paginas: Optional[int] = Form(None)
+    editorial: Optional[str] = Form(None)
+    fecha_publicacion: Optional[str] = Form(None)
+    edicion: Optional[str] = Form(None)
+    idioma: Optional[str] = Form(None)
+    peso_libro: Optional[float] = Form(None)
+    formato_libro: Optional[str] = Form(None)
+    tipo_literatura: Optional[str] = Form(None)
+    resena: Optional[str] = Form(None)
+
+class LibroCreate(LibroBase):
+    codigo_inventario: int = Form(...)
+    titulo: str = Form(...)  
+    autor: str = Form(...)  
+
+class LibroResponse(BaseModel):
+    material: MaterialResponse
+    codigo_inventario: int
+    isbn: Optional[str] = None
+    numero_paginas: Optional[int] = None
+    editorial: Optional[str] = None
+    fecha_publicacion: Optional[str] = None
+    edicion: Optional[str] = None
+    idioma: Optional[str] = None
+    peso_libro: Optional[float] = None
+    formato_libro: Optional[str] = None
+    tipo_literatura: Optional[str] = None
+    resena: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+# 📕 Esquema para Revistas
+class RevistaBase(BaseModel):
+    isbn: Optional[str] = Form(None)
+    numero_edicion: Optional[int] = Form(None)
+    fecha_publicacion: Optional[str] = Form(None)
+
+class RevistaCreate(RevistaBase):
+    codigo_inventario: int = Form(...)
+    titulo: str = Form(...)  
+    autor: str = Form(...)  
+
+class RevistaResponse(BaseModel):
+    material: MaterialResponse
+    codigo_inventario: int
+    isbn: Optional[str] = None
+    numero_edicion: Optional[int] = None
+    fecha_publicacion: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+# 📀 Esquema para DVDs
+class DVDBase(BaseModel):
+    isbn: Optional[str] = Form(None)
+    duracion: Optional[int] = Form(None)
+    formato: Optional[str] = Form(None)
+
+class DVDCreate(DVDBase):
+    codigo_inventario: int = Form(...)
+    titulo: str = Form(...)  
+    autor: str = Form(...)  
+
+class DVDResponse(BaseModel):
+    material: MaterialResponse
+    codigo_inventario: int
+    isbn: Optional[str] = None
+    duracion: Optional[int] = None
+    formato: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+# 👤 Esquema para Usuarios
+class UsuarioBase(BaseModel):
+    nombre: str = Form(...)
+    apellido: str = Form(...)
+    email: EmailStr = Form(...)
+
+class UsuarioCreate(UsuarioBase):
+    pass  
+
+class UsuarioResponse(UsuarioBase):
+    usuario_id: int
+    fecha_registro: datetime
+
+    class Config:
+        from_attributes = True
+
+# 🔄 Esquema para Préstamos
+class PrestamoBase(BaseModel):
+    codigo_inventario: int = Form(...)
+    usuario_id: int = Form(...)
+
+class PrestamoCreate(PrestamoBase):
+    pass  
+
+class PrestamoResponse(BaseModel):
+    prestamo_id: int
+    fecha_prestamo: datetime
+    fecha_devolucion: Optional[datetime] = None
+    devuelto: bool
+
+    class Config:
+        from_attributes = True
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\settings.py
+# sigesbi-api/settings.py
+# Configuración global del proyecto SIGESBI
+
+import os
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde el archivo .env
+load_dotenv()
+
+class Settings:
+    """ Clase para manejar la configuración global del proyecto """
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./sigesbi.db")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "supersecreto")
+    DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "False").lower() == "true"
+
+settings = Settings()
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\templates.py
+# templates.py
+import os
+from fastapi.templating import Jinja2Templates
+
+# Define el directorio de las plantillas. Se asume que la carpeta 'templates' se encuentra en la raíz del proyecto.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\utils.py
+# sigesbi-api/utils.py
+# 
+from fastapi.responses import JSONResponse
+from typing import Any
+
+def respuesta_personalizada(mensaje: str, codigo: int = 200, data: Any = None):
+    """ 
+    Genera una respuesta JSON personalizada con mensaje, código de estado y datos opcionales.
+    """
+    return JSONResponse(content={"mensaje": mensaje, "datos": data}, status_code=codigo)
+
+def validar_codigo_inventario(codigo: int) -> bool:
+    """ Valida que un código de inventario sea un número positivo. """
+    return isinstance(codigo, int) and codigo > 0
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\create_mongo_tables.py
+#!/usr/bin/env python3
+"""
+create_mongo_tables.py
+
+Este script se conecta a MongoDB usando los parámetros definidos en el archivo .env
+y crea (o actualiza) las colecciones para almacenar las reseñas de los productos:
+    - libro_resenas
+    - dvd_resenas
+    - revista_resenas
+
+Cada colección se crea con un validador JSON que asegura que los documentos tengan
+los campos "codigo_inventario" (tipo int) y "resena" (tipo string).
+
+"""
+
+import os
+from pymongo import MongoClient
+from pymongo.errors import CollectionInvalid
+from dotenv import load_dotenv
+
+# Cargar las variables de entorno desde .env
+load_dotenv()
+
+# Obtener la URL de conexión a MongoDB desde el .env (sin valor por defecto)
+MONGO_URL = os.getenv("MONGO_URL")
+if not MONGO_URL:
+    raise Exception("La variable MONGO_URL no está definida en el archivo .env")
+
+# Conectar al cliente MongoDB y seleccionar la base de datos para reseñas
+client = MongoClient(MONGO_URL)
+db = client["sigesbi_reviews"]
+
+# Definir un esquema de validación JSON para las colecciones de reseñas.
+validator = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["codigo_inventario", "resena"],
+        "properties": {
+            "codigo_inventario": {
+                "bsonType": "int",
+                "description": "debe ser un entero y es requerido"
+            },
+            "resena": {
+                "bsonType": "string",
+                "description": "debe ser una cadena y es requerida"
+            }
+        }
+    }
+}
+
+# Diccionario de colecciones a crear con su respectivo validator.
+collections_to_create = {
+    "libro_resenas": validator,
+    "dvd_resenas": validator,
+    "revista_resenas": validator,
+}
+
+def create_collections():
+    for col_name, val in collections_to_create.items():
+        try:
+            # Se intenta crear la colección con el validator
+            db.create_collection(col_name, validator=val)
+            print(f"Collection '{col_name}' creada con éxito.")
+        except CollectionInvalid:
+            # La colección ya existe. Podemos actualizar el validator si fuera necesario.
+            print(f"Collection '{col_name}' ya existe.")
+        except Exception as e:
+            print(f"Error al crear la colección '{col_name}': {e}")
+
+if __name__ == "__main__":
+    create_collections()
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\mongodb.py
+#!/usr/bin/env python3
+"""
+create_mongo_tables.py
+
+Este script se conecta a MongoDB usando los parámetros definidos en el archivo .env
+y crea (o actualiza) las colecciones para almacenar las reseñas de los productos:
+    - libro_resenas
+    - dvd_resenas
+    - revista_resenas
+
+Cada colección se crea con un validador JSON que asegura que los documentos tengan
+los campos "codigo_inventario" (tipo int) y "resena" (tipo string).
+
+
+"""
+
+import os
+from pymongo import MongoClient
+from pymongo.errors import CollectionInvalid
+from dotenv import load_dotenv
+
+# Cargar las variables de entorno desde .env
+load_dotenv()
+
+# Obtener la URL de conexión a MongoDB desde el .env (sin usar un valor por defecto)
+MONGO_URL = os.getenv("MONGO_URL")
+if not MONGO_URL:
+    raise Exception("La variable MONGO_URL no está definida en el archivo .env")
+
+# Conectar al cliente MongoDB y seleccionar la base de datos para reseñas
+client = MongoClient(MONGO_URL)
+db = client["sigesbi_reviews"]
+
+# Definir un esquema de validación JSON para las colecciones de reseñas.
+# En estos esquemas, se valida que los documentos tengan 'codigo_inventario' (int)
+# y 'resena' (string).
+validator = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["codigo_inventario", "resena"],
+        "properties": {
+            "codigo_inventario": {
+                "bsonType": "int",
+                "description": "debe ser un entero y es requerido"
+            },
+            "resena": {
+                "bsonType": "string",
+                "description": "debe ser una cadena y es requerida"
+            }
+        }
+    }
+}
+
+# Diccionario de colecciones a crear con su respectivo validator.
+collections_to_create = {
+    "libro_resenas": validator,
+    "dvd_resenas": validator,
+    "revista_resenas": validator,
+}
+
+def create_collections():
+    for col_name, val in collections_to_create.items():
+        try:
+            # Se intenta crear la colección con el validator
+            db.create_collection(col_name, validator=val)
+            print(f"Collection '{col_name}' creada con éxito.")
+        except CollectionInvalid:
+            # La colección ya existe. Podemos actualizar el validator si fuera necesario.
+            print(f"Collection '{col_name}' ya existe.")
+        except Exception as e:
+            print(f"Error al crear la colección '{col_name}': {e}")
+
+if __name__ == "__main__":
+    create_collections()
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\templates.py
+# templates.py
+import os
+from fastapi.templating import Jinja2Templates
+
+# Define el directorio de las plantillas. Se asume que la carpeta 'templates' se encuentra en la raíz del proyecto.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\routers\dvds.py
+# sigesbi-api/routers/dvds.py
+from fastapi import APIRouter, Depends, HTTPException, Form
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import IntegrityError
+from ..database import get_db
+from ..models import DVD, MaterialBiblioteca
+from ..schemas import DVDResponse
+from ..mongodb import iinsert_review, get_review, delete_review
+
+
+router = APIRouter()
+
+@router.post("/", response_model=DVDResponse)
+def agregar_dvd(
+    codigo_inventario: int = Form(...),
+    titulo: str = Form(...),
+    autor: str = Form(...),
+    isbn: str = Form(None),
+    duracion: int = Form(None),
+    formato: str = Form(None),
+    resena: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Agrega un nuevo DVD a la biblioteca usando datos tipo formulario.
+    Almacena la reseña en MongoDB.
+    """
+    material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=codigo_inventario).first()
+    if not material:
+        material = MaterialBiblioteca(
+            codigo_inventario=codigo_inventario,
+            titulo=titulo,
+            autor=autor,
+            tipo_material="DVD"
+        )
+        db.add(material)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Error al crear el material")
+
+    dvd_existente = db.query(DVD).filter_by(codigo_inventario=codigo_inventario).first()
+    if dvd_existente:
+        raise HTTPException(status_code=409, detail="Ya existe un DVD con ese código de inventario")
+
+    nuevo_dvd = DVD(
+        codigo_inventario=codigo_inventario,
+        isbn=isbn,
+        duracion=duracion,
+        formato=formato
+    )
+    db.add(nuevo_dvd)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al insertar el DVD")
+
+    db.refresh(nuevo_dvd)
+    if resena:
+        insert_review("dvd", codigo_inventario, resena)
+    dvd_dict = nuevo_dvd.__dict__
+    dvd_dict["resena"] = get_review("dvd", codigo_inventario)
+    return dvd_dict
+
+@router.get("/", response_model=list[DVDResponse])
+def listar_dvds(db: Session = Depends(get_db)):
+    """
+    Lista todos los DVDs, incluyendo la reseña almacenada en MongoDB.
+    """
+    dvds = db.query(DVD).options(joinedload(DVD.material)).all()
+    result = []
+    for dvd in dvds:
+        dvd_dict = dvd.__dict__
+        dvd_dict["resena"] = get_review("dvd", dvd.codigo_inventario)
+        result.append(dvd_dict)
+    return result
+
+@router.get("/{codigo_inventario}", response_model=DVDResponse)
+def obtener_dvd(codigo_inventario: int, db: Session = Depends(get_db)):
+    """
+    Obtiene un DVD por su código de inventario, incluyendo la reseña almacenada en MongoDB.
+    """
+    dvd = db.query(DVD).options(joinedload(DVD.material)).filter_by(codigo_inventario=codigo_inventario).first()
+    if not dvd:
+        raise HTTPException(status_code=404, detail="DVD no encontrado")
+    dvd_dict = dvd.__dict__
+    dvd_dict["resena"] = get_review("dvd", codigo_inventario)
+    return dvd_dict
+
+@router.delete("/{codigo_inventario}")
+def eliminar_dvd(codigo_inventario: int, db: Session = Depends(get_db)):
+    """
+    Elimina un DVD y su registro asociado en MaterialBiblioteca,
+    además elimina la reseña en MongoDB.
+    """
+    dvd = db.query(DVD).filter_by(codigo_inventario=codigo_inventario).first()
+    if not dvd:
+        raise HTTPException(status_code=404, detail="DVD no encontrado")
+
+    material = dvd.material
+    db.delete(dvd)
+    db.commit()
+    if material:
+        db.delete(material)
+        db.commit()
+    delete_review("dvd", codigo_inventario)
+    return {"message": "DVD y registro de material eliminado exitosamente"}
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\routers\libros.py
+# sigesbi-api/routers/libros.py
+from fastapi import APIRouter, Depends, HTTPException, Form
+from sqlalchemy.orm import Session, joinedload
+from ..database import get_db
+from ..models import Libro, MaterialBiblioteca
+from ..schemas import LibroResponse
+from sqlalchemy.exc import IntegrityError
+from ..mongodb import insert_review, get_review, delete_review
+
+
+router = APIRouter()
+
+@router.post("/", response_model=LibroResponse)
+def agregar_libro(
+    codigo_inventario: int = Form(...),
+    titulo: str = Form(...),
+    autor: str = Form(...),
+    isbn: str = Form(None),
+    numero_paginas: int = Form(None),
+    editorial: str = Form(None),
+    fecha_publicacion: str = Form(None),
+    edicion: str = Form(None),
+    idioma: str = Form(None),
+    peso_libro: float = Form(None),
+    formato_libro: str = Form(None),
+    tipo_literatura: str = Form(None),
+    resena: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Agrega un nuevo libro a la biblioteca usando datos tipo formulario.
+    El campo 'resena' se guarda en MongoDB.
+    """
+    # Verificar o crear registro en MaterialBiblioteca
+    material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=codigo_inventario).first()
+    if not material:
+        material = MaterialBiblioteca(
+            codigo_inventario=codigo_inventario,
+            titulo=titulo,
+            autor=autor,
+            tipo_material="Libro"
+        )
+        db.add(material)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Error al crear el registro de material")
+    
+    # Verificar si ya existe el libro
+    libro_existente = db.query(Libro).filter_by(codigo_inventario=codigo_inventario).first()
+    if libro_existente:
+        raise HTTPException(status_code=409, detail="Ya existe un libro con ese código de inventario")
+    
+    # Crear el registro en libros (no se asigna 'resena' en SQLite, se gestiona en MongoDB)
+    nuevo_libro = Libro(
+        codigo_inventario=codigo_inventario,
+        isbn=isbn,
+        numero_paginas=numero_paginas,
+        editorial=editorial,
+        fecha_publicacion=fecha_publicacion,
+        edicion=edicion,
+        idioma=idioma,
+        peso_libro=peso_libro,
+        formato_libro=formato_libro,
+        tipo_literatura=tipo_literatura
+    )
+    db.add(nuevo_libro)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al insertar el libro")
+    
+    db.refresh(nuevo_libro)
+    # Insertar la reseña en MongoDB si se proporcionó
+    if resena:
+        insert_review("libro", codigo_inventario, resena)
+    # Leer la reseña de MongoDB para adjuntarla en la respuesta
+    mongo_resena = get_review("libro", codigo_inventario)
+    libro_dict = nuevo_libro.__dict__
+    libro_dict["resena"] = mongo_resena
+    return libro_dict
+
+@router.get("/", response_model=list[LibroResponse])
+def listar_libros(db: Session = Depends(get_db)):
+    """
+    Lista todos los libros con la información del material asociado,
+    incluyendo la reseña almacenada en MongoDB.
+    """
+    libros = db.query(Libro).options(joinedload(Libro.material)).all()
+    result = []
+    for libro in libros:
+        libro_dict = libro.__dict__
+        libro_dict["resena"] = get_review("libro", libro.codigo_inventario)
+        result.append(libro_dict)
+    return result
+
+@router.get("/{codigo_inventario}", response_model=LibroResponse)
+def obtener_libro(codigo_inventario: int, db: Session = Depends(get_db)):
+    """
+    Obtiene la información de un libro por su código de inventario,
+    incluyendo la reseña almacenada en MongoDB.
+    """
+    libro = db.query(Libro).options(joinedload(Libro.material))\
+                         .filter_by(codigo_inventario=codigo_inventario).first()
+    if not libro:
+        raise HTTPException(status_code=404, detail="Libro no encontrado")
+    libro_dict = libro.__dict__
+    libro_dict["resena"] = get_review("libro", codigo_inventario)
+    return libro_dict
+
+@router.delete("/{codigo_inventario}")
+def eliminar_libro(codigo_inventario: int, db: Session = Depends(get_db)):
+    """
+    Elimina un libro y su registro asociado en MaterialBiblioteca,
+    además elimina la reseña en MongoDB.
+    """
+    libro = db.query(Libro).filter_by(codigo_inventario=codigo_inventario).first()
+    if not libro:
+        raise HTTPException(status_code=404, detail="Libro no encontrado")
+    
+    material = libro.material
+    if material:
+        db.delete(material)
+    db.delete(libro)
+    db.commit()
+    delete_review("libro", codigo_inventario)
+    return {"message": "Libro y registro de material eliminado exitosamente"}
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\routers\prestamos.py
+# sigesbi-api/routers/prestamos.py
+from fastapi import APIRouter, Depends, HTTPException, Form
+from sqlalchemy.orm import Session
+from ..database import get_db
+from ..models import Prestamo, MaterialBiblioteca, Usuario
+from ..schemas import PrestamoResponse
+from datetime import datetime
+
+router = APIRouter()
+
+@router.post("/", response_model=PrestamoResponse)
+def registrar_prestamo(
+    codigo_inventario: int = Form(...),
+    usuario_id: int = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Registra un préstamo de un material en la biblioteca usando datos de formulario.
+    """
+    # Validar usuario
+    usuario = db.query(Usuario).filter_by(usuario_id=usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Validar material
+    material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=codigo_inventario).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Material no encontrado")
+    
+    # Verificar disponibilidad del material
+    if not material.disponible:
+        raise HTTPException(status_code=400, detail="El material no está disponible para préstamo")
+    
+    # Crear el préstamo y actualizar la disponibilidad
+    nuevo_prestamo = Prestamo(
+        codigo_inventario=codigo_inventario,
+        usuario_id=usuario_id,
+        fecha_prestamo=datetime.now()
+    )
+    material.disponible = False
+    db.add(nuevo_prestamo)
+    db.commit()
+    db.refresh(nuevo_prestamo)
+    return nuevo_prestamo
+
+@router.get("/", response_model=list[PrestamoResponse])
+def listar_prestamos(db: Session = Depends(get_db)):
+    """
+    Lista todos los préstamos pendientes (no devueltos).
+    """
+    prestamos = db.query(Prestamo).filter_by(devuelto=False).all()
+    return prestamos
+
+@router.post("/devolver/{prestamo_id}")
+def devolver_prestamo(prestamo_id: int, db: Session = Depends(get_db)):
+    """
+    Marca un préstamo como devuelto, actualizando la fecha de devolución y la disponibilidad del material.
+    """
+    prestamo = db.query(Prestamo).filter_by(prestamo_id=prestamo_id).first()
+    if not prestamo:
+        raise HTTPException(status_code=404, detail="Préstamo no encontrado")
+    if prestamo.devuelto:
+        raise HTTPException(status_code=400, detail="El préstamo ya fue devuelto")
+    
+    prestamo.devuelto = True
+    prestamo.fecha_devolucion = datetime.now()
+    
+    material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=prestamo.codigo_inventario).first()
+    if material:
+        material.disponible = True
+    
+    db.commit()
+    return {"message": "Préstamo devuelto exitosamente"}
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\routers\revistas.py
+# sigesbi-api/routers/revistas.py
+from fastapi import APIRouter, Depends, HTTPException, Form
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import IntegrityError
+from ..database import get_db
+from ..models import Revista, MaterialBiblioteca
+from ..schemas import RevistaResponse
+from ..mongodb import insert_review, get_review, delete_review
+
+
+router = APIRouter()
+
+@router.post("/", response_model=RevistaResponse)
+def agregar_revista(
+    codigo_inventario: int = Form(...),
+    titulo: str = Form(...),
+    autor: str = Form(...),
+    isbn: str = Form(None),
+    numero_edicion: int = Form(None),
+    fecha_publicacion: str = Form(None),
+    resena: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Agrega una nueva revista a la biblioteca usando datos tipo formulario.
+    Almacena la reseña en MongoDB.
+    """
+    material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=codigo_inventario).first()
+    if not material:
+        material = MaterialBiblioteca(
+            codigo_inventario=codigo_inventario,
+            titulo=titulo,
+            autor=autor,
+            tipo_material="Revista"
+        )
+        db.add(material)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Error al crear el material")
+    
+    revista_existente = db.query(Revista).filter_by(codigo_inventario=codigo_inventario).first()
+    if revista_existente:
+        raise HTTPException(status_code=409, detail="Ya existe una revista con ese código de inventario")
+    
+    nuevo_revista = Revista(
+        codigo_inventario=codigo_inventario,
+        isbn=isbn,
+        numero_edicion=numero_edicion,
+        fecha_publicacion=fecha_publicacion
+    )
+    db.add(nuevo_revista)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al insertar la revista")
+    
+    db.refresh(nuevo_revista)
+    if resena:
+        insert_review("revista", codigo_inventario, resena)
+    revista_dict = nuevo_revista.__dict__
+    revista_dict["resena"] = get_review("revista", codigo_inventario)
+    return revista_dict
+
+@router.get("/", response_model=list[RevistaResponse])
+def listar_revistas(db: Session = Depends(get_db)):
+    """
+    Lista todas las revistas, incluyendo la reseña almacenada en MongoDB.
+    """
+    revistas = db.query(Revista).options(joinedload(Revista.material)).all()
+    result = []
+    for revista in revistas:
+        revista_dict = revista.__dict__
+        revista_dict["resena"] = get_review("revista", revista.codigo_inventario)
+        result.append(revista_dict)
+    return result
+
+@router.get("/{codigo_inventario}", response_model=RevistaResponse)
+def obtener_revista(codigo_inventario: int, db: Session = Depends(get_db)):
+    """
+    Obtiene la información de una revista por su código de inventario,
+    incluyendo la reseña almacenada en MongoDB.
+    """
+    revista = db.query(Revista).options(joinedload(Revista.material))\
+                               .filter_by(codigo_inventario=codigo_inventario).first()
+    if not revista:
+        raise HTTPException(status_code=404, detail="Revista no encontrada")
+    revista_dict = revista.__dict__
+    revista_dict["resena"] = get_review("revista", codigo_inventario)
+    return revista_dict
+
+@router.delete("/{codigo_inventario}")
+def eliminar_revista(codigo_inventario: int, db: Session = Depends(get_db)):
+    """
+    Elimina una revista y su registro asociado en MaterialBiblioteca,
+    además elimina la reseña en MongoDB.
+    """
+    revista = db.query(Revista).filter_by(codigo_inventario=codigo_inventario).first()
+    if not revista:
+        raise HTTPException(status_code=404, detail="Revista no encontrada")
+    
+    material = revista.material
+    if material:
+        db.delete(material)
+    db.delete(revista)
+    db.commit()
+    delete_review("revista", codigo_inventario)
+    return {"message": "Revista y registro de material eliminado exitosamente"}
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\routers\usuarios.py
+# sigesbi/routers/usuarios.py
+from fastapi import APIRouter, Depends, HTTPException, Form
+from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
+import os
+from ..database import get_db
+from ..models import Usuario
+from ..schemas import UsuarioCreate, UsuarioResponse
+
+router = APIRouter()
+
+# POST con JSON (existente)
+@router.post("/", response_model=UsuarioResponse)
+def registrar_usuario(usuario_data: UsuarioCreate, db: Session = Depends(get_db)):
+    if db.query(Usuario).filter(Usuario.email == usuario_data.email).first():
+        raise HTTPException(status_code=400, detail="El email ya está registrado")
+    nuevo_usuario = Usuario(**usuario_data.dict())
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    return nuevo_usuario
+
+# POST desde formulario (x-www-form-urlencoded)
+@router.post("/formulario", response_model=UsuarioResponse)
+def registrar_usuario_form(
+    nombre: str = Form(...),
+    apellido: str = Form(...),
+    email: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    if db.query(Usuario).filter(Usuario.email == email).first():
+        raise HTTPException(status_code=400, detail="El email ya está registrado")
+    nuevo_usuario = Usuario(nombre=nombre, apellido=apellido, email=email)
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    return nuevo_usuario
+
+# Servir formulario HTML sin Jinja2
+@router.get("/form", response_class=HTMLResponse)
+def mostrar_form_usuario():
+    ruta = os.path.join("templates", "form_usuario.html")
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Formulario no encontrado")
+
+# Listar usuarios
+@router.get("/", response_model=list[UsuarioResponse])
+def listar_usuarios(db: Session = Depends(get_db)):
+    return db.query(Usuario).all()
+
+# Obtener usuario por id
+@router.get("/{usuario_id}", response_model=UsuarioResponse)
+def obtener_usuario(usuario_id: int, db: Session = Depends(get_db)):
+    usuario = db.query(Usuario).filter(Usuario.usuario_id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return usuario
+
+# Eliminar usuario
+@router.delete("/{usuario_id}")
+def eliminar_usuario(usuario_id: int, db: Session = Depends(get_db)):
+    usuario = db.query(Usuario).filter(Usuario.usuario_id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    db.delete(usuario)
+    db.commit()
+    return {"message": "Usuario eliminado exitosamente"}
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\templates\dvds.html
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Gestión de DVDs</title>
+  </head>
+  <body>
+    <h1>Gestión de DVDs</h1>
+    <h2>Cargar Nuevo DVD</h2>
+    <form action="/dvds/" method="post">
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required /><br />
+
+      <label for="titulo">Título:</label>
+      <input type="text" name="titulo" required /><br />
+
+      <label for="autor">Autor:</label>
+      <input type="text" name="autor" required /><br />
+
+      <label for="isbn">ISBN:</label>
+      <input type="text" name="isbn" /><br />
+
+      <label for="duracion">Duración:</label>
+      <input type="number" name="duracion" /><br />
+
+      <label for="formato">Formato:</label>
+      <input type="text" name="formato" /><br />
+
+      <button type="submit">Cargar DVD</button>
+    </form>
+
+    <h2>Consultar DVD por Código</h2>
+    <form action="/dvds/" method="get">
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required />
+      <button type="submit">Consultar</button>
+    </form>
+
+    <h2>Consulta Masiva de DVDs</h2>
+    <a href="/dvds/">Ver todos los DVDs</a>
+
+    <h2>Eliminar DVD</h2>
+    <form
+      action="/dvds/"
+      method="post"
+      onsubmit="confirm('¿Seguro que deseas eliminar?')"
+    >
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required />
+      <button type="button" onclick="eliminarDVD()">Eliminar</button>
+    </form>
+
+    <script>
+      function eliminarDVD() {
+        const codigo = document.querySelector(
+          'input[name="codigo_inventario"]'
+        ).value;
+        fetch(`/dvds/${codigo}`, { method: "DELETE" })
+          .then((response) => response.json())
+          .then((data) => alert(JSON.stringify(data)))
+          .catch((error) => alert("Error: " + error));
+      }
+    </script>
+  </body>
+</html>
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\templates\index.html
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SiGesBi API</title>
+  </head>
+  <body>
+    <h1>{{ message }}</h1>
+    <p>Bienvenido a SiGesBi API</p>
+    <nav>
+      <ul>
+        <li><a href="/formulario-libros">Formulario Libros</a></li>
+        <li><a href="/formulario-revistas">Formulario Revistas</a></li>
+        <li><a href="/formulario-dvds">Formulario DVDs</a></li>
+        <li><a href="/formulario-usuarios">Formulario Usuarios</a></li>
+      </ul>
+    </nav>
+  </body>
+</html>
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\templates\libros.html
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Gestión de Libros</title>
+  </head>
+  <body>
+    <h1>Gestión de Libros</h1>
+
+    <h2>Cargar Nuevo Libro</h2>
+    <form action="/libros/" method="post">
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required /><br />
+
+      <label for="titulo">Título:</label>
+      <input type="text" name="titulo" required /><br />
+
+      <label for="autor">Autor:</label>
+      <input type="text" name="autor" required /><br />
+
+      <label for="isbn">ISBN:</label>
+      <input type="text" name="isbn" /><br />
+
+      <label for="numero_paginas">Número de Páginas:</label>
+      <input type="number" name="numero_paginas" /><br />
+
+      <label for="editorial">Editorial:</label>
+      <input type="text" name="editorial" /><br />
+
+      <label for="fecha_publicacion">Fecha de Publicación:</label>
+      <input type="text" name="fecha_publicacion" /><br />
+
+      <label for="edicion">Edición:</label>
+      <input type="text" name="edicion" /><br />
+
+      <label for="idioma">Idioma:</label>
+      <input type="text" name="idioma" /><br />
+
+      <label for="peso_libro">Peso Libro:</label>
+      <input type="number" step="0.1" name="peso_libro" /><br />
+
+      <label for="formato_libro">Formato Libro:</label>
+      <input type="text" name="formato_libro" /><br />
+
+      <label for="tipo_literatura">Tipo de Literatura:</label>
+      <input type="text" name="tipo_literatura" /><br />
+
+      <label for="resena">Reseña:</label>
+      <textarea name="resena"></textarea><br />
+
+      <button type="submit">Cargar Libro</button>
+    </form>
+
+    <h2>Consultar Libro por Código</h2>
+    <!-- Se asigna un id al formulario para interceptar el submit y redirigir correctamente -->
+    <form id="form-consulta-libro" action="/libros/" method="get">
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input
+        type="number"
+        id="codigo_consulta"
+        name="codigo_inventario"
+        required
+      />
+      <button type="submit">Consultar</button>
+    </form>
+
+    <h2>Consulta Masiva de Libros</h2>
+    <a href="/libros/">Ver todos los Libros</a>
+
+    <h2>Eliminar Libro</h2>
+    <form
+      action="/libros/"
+      method="post"
+      onsubmit="confirm('¿Seguro que deseas eliminar?')"
+    >
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required />
+      <!-- Nota: Para eliminar, se deberá enviar una solicitud DELETE vía JavaScript o herramientas como Postman -->
+      <button type="button" onclick="eliminarLibro()">Eliminar</button>
+    </form>
+
+    <script>
+      // Función para eliminar un libro mediante el método DELETE hacia la URL de ruta
+      function eliminarLibro() {
+        const codigo = document.querySelector(
+          'input[name="codigo_inventario"]'
+        ).value;
+        fetch(`/libros/${codigo}`, { method: "DELETE" })
+          .then((response) => response.json())
+          .then((data) => alert(JSON.stringify(data)))
+          .catch((error) => alert("Error: " + error));
+      }
+
+      // Intercepta el submit del formulario de consulta para redirigir a la URL correcta (/libros/{codigo})
+      document
+        .getElementById("form-consulta-libro")
+        .addEventListener("submit", function (event) {
+          event.preventDefault(); // Evita el comportamiento por defecto del formulario
+          const codigo = document.getElementById("codigo_consulta").value;
+          // Redirige a la URL con el parámetro de ruta
+          window.location.href = `/libros/${codigo}`;
+        });
+    </script>
+  </body>
+</html>
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\templates\revistas.html
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Gestión de Revistas</title>
+  </head>
+  <body>
+    <h1>Gestión de Revistas</h1>
+    <h2>Cargar Nueva Revista</h2>
+    <form action="/revistas/" method="post">
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required /><br />
+
+      <label for="titulo">Título:</label>
+      <input type="text" name="titulo" required /><br />
+
+      <label for="autor">Autor:</label>
+      <input type="text" name="autor" required /><br />
+
+      <label for="isbn">ISBN:</label>
+      <input type="text" name="isbn" /><br />
+
+      <label for="numero_edicion">Número de Edición:</label>
+      <input type="number" name="numero_edicion" /><br />
+
+      <label for="fecha_publicacion">Fecha de Publicación:</label>
+      <input type="text" name="fecha_publicacion" /><br />
+
+      <button type="submit">Cargar Revista</button>
+    </form>
+
+    <h2>Consultar Revista por Código</h2>
+    <form action="/revistas/" method="get">
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required />
+      <button type="submit">Consultar</button>
+    </form>
+
+    <h2>Consulta Masiva de Revistas</h2>
+    <a href="/revistas/">Ver todas las Revistas</a>
+
+    <h2>Eliminar Revista</h2>
+    <form
+      action="/revistas/"
+      method="post"
+      onsubmit="confirm('¿Seguro que deseas eliminar?')"
+    >
+      <label for="codigo_inventario">Código Inventario:</label>
+      <input type="number" name="codigo_inventario" required />
+      <button type="button" onclick="eliminarRevista()">Eliminar</button>
+    </form>
+
+    <script>
+      function eliminarRevista() {
+        const codigo = document.querySelector(
+          'input[name="codigo_inventario"]'
+        ).value;
+        fetch(`/revistas/${codigo}`, { method: "DELETE" })
+          .then((response) => response.json())
+          .then((data) => alert(JSON.stringify(data)))
+          .catch((error) => alert("Error: " + error));
+      }
+    </script>
+  </body>
+</html>
+
+----------------------------------------
+# C:\americo\API\sigesbi_api\templates\usuarios.html
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Gestión de Usuarios</title>
+  </head>
+  <body>
+    <h1>Gestión de Usuarios</h1>
+    <h2>Registrar Nuevo Usuario</h2>
+    <form action="/usuarios/" method="post">
+      <label for="nombre">Nombre:</label>
+      <input type="text" name="nombre" required /><br />
+
+      <label for="apellido">Apellido:</label>
+      <input type="text" name="apellido" required /><br />
+
+      <label for="email">Email:</label>
+      <input type="email" name="email" required /><br />
+
+      <button type="submit">Registrar Usuario</button>
+    </form>
+
+    <h2>Consultar Usuario por ID</h2>
+    <form action="/usuarios/" method="get">
+      <label for="usuario_id">ID de Usuario:</label>
+      <input type="number" name="usuario_id" required />
+      <button type="submit">Consultar</button>
+    </form>
+
+    <h2>Consulta Masiva de Usuarios</h2>
+    <a href="/usuarios/">Ver todos los Usuarios</a>
+
+    <h2>Eliminar Usuario</h2>
+    <form
+      action="/usuarios/"
+      method="post"
+      onsubmit="confirm('¿Seguro que deseas eliminar?')"
+    >
+      <label for="usuario_id">ID de Usuario:</label>
+      <input type="number" name="usuario_id" required />
+      <button type="button" onclick="eliminarUsuario()">Eliminar</button>
+    </form>
+
+    <script>
+      function eliminarUsuario() {
+        const usuario_id = document.querySelector(
+          'input[name="usuario_id"]'
+        ).value;
+        fetch(`/usuarios/${usuario_id}`, { method: "DELETE" })
+          .then((response) => response.json())
+          .then((data) => alert(JSON.stringify(data)))
+          .catch((error) => alert("Error: " + error));
+      }
+    </script>
+  </body>
+</html>
+

@@ -1,5 +1,5 @@
-# sigesbi-api/database.py
-# 
+# sigesbi_api/database.py
+
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 import os
@@ -8,13 +8,17 @@ from dotenv import load_dotenv
 # Cargar variables de entorno
 load_dotenv()
 
-# Configuración de la conexión a la base de datos
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sigesbi.db")
+# Obtener la ruta del directorio actual de este archivo (debería ser "C:\americo\API\sigesbi_api")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+print(f"BASE_DIR: {BASE_DIR}")  # Esto ayudará a confirmar la ruta.
+# Construir la ruta de la base de datos dentro de sigesbi_api
+db_path = os.path.join(BASE_DIR, "sigesbi.db")
+# Establecer DATABASE_URL: si no se establece en el .env, utiliza el valor por defecto con la ruta correcta
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{db_path}")
 
 engine = create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia para obtener la sesión de la base de datos
 def get_db():
     db = SessionLocal()
     try:

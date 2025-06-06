@@ -2,10 +2,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from database import get_db
-from models import Usuario
-from schemas import UsuarioCreate, UsuarioResponse
 import os
+from ..database import get_db
+from ..models import Usuario
+from ..schemas import UsuarioCreate, UsuarioResponse
 
 router = APIRouter()
 

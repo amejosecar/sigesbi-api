@@ -1,15 +1,20 @@
-## sigesbi-api/main.py
-# sigesbi-api/main.py
+# sigesbi_api/main.py
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from routers import libros, revistas, dvds, usuarios, prestamos
-from templates import templates  # Importa la configuración de templates desde un módulo separado
+from .routers import libros, revistas, dvds, usuarios, prestamos
+from .templates import templates
+from .startup import init_databases  # Importa la función de inicialización
 
 app = FastAPI(
     title="SiGesBi API",
     description="Sistema de Gestión de Biblioteca con FastAPI",
     version="1.0.0"
 )
+
+# Configurar el evento de startup para validar y crear las BD (SQLite y MongoDB)
+@app.on_event("startup")
+async def startup_event():
+    init_databases()
 
 # Registrar los routers
 app.include_router(libros.router, prefix="/libros", tags=["Libros"])
@@ -18,12 +23,10 @@ app.include_router(dvds.router, prefix="/dvds", tags=["DVDs"])
 app.include_router(usuarios.router, prefix="/usuarios", tags=["Usuarios"])
 app.include_router(prestamos.router, prefix="/prestamos", tags=["Préstamos"])
 
-# Endpoint de bienvenida (opcional)
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "message": "Bienvenido a SiGesBi API"})
 
-# Endpoints para servir formularios HTML para cada modelo
 @app.get("/formulario-libros", response_class=HTMLResponse)
 def formulario_libros(request: Request):
     return templates.TemplateResponse("libros.html", {"request": request})

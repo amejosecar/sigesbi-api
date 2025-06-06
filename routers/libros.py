@@ -1,14 +1,16 @@
-# sigesbi-api/routers/libros.py
+# sigesbi_api/routers/libros.py
+
 from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session, joinedload
-from database import get_db
-from models import Libro, MaterialBiblioteca
-from schemas import LibroResponse
+from ..database import get_db
+from ..models import Libro, MaterialBiblioteca
+from ..schemas import LibroResponse
 from sqlalchemy.exc import IntegrityError
 from ..mongodb import insert_review, get_review, delete_review
-
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/", response_model=LibroResponse)
 def agregar_libro(
@@ -29,7 +31,7 @@ def agregar_libro(
 ):
     """
     Agrega un nuevo libro a la biblioteca usando datos tipo formulario.
-    El campo 'resena' se guarda en MongoDB.
+    El campo 'resena' se guarda en MongoDB y se asigna al atributo 'resena' del modelo.
     """
     # Verificar o crear registro en MaterialBiblioteca
     material = db.query(MaterialBiblioteca).filter_by(codigo_inventario=codigo_inventario).first()
@@ -43,16 +45,19 @@ def agregar_libro(
         db.add(material)
         try:
             db.commit()
-        except IntegrityError:
+            db.refresh(material)
+            logger.info(f"Registro en MaterialBiblioteca creado (código: {codigo_inventario}).")
+        except IntegrityError as ie:
             db.rollback()
+            logger.error("Error al crear el registro de material", exc_info=ie)
             raise HTTPException(status_code=500, detail="Error al crear el registro de material")
-    
+
     # Verificar si ya existe el libro
     libro_existente = db.query(Libro).filter_by(codigo_inventario=codigo_inventario).first()
     if libro_existente:
         raise HTTPException(status_code=409, detail="Ya existe un libro con ese código de inventario")
     
-    # Crear el registro en libros (no se asigna 'resena' en SQLite, se gestiona en MongoDB)
+    # Crear el registro en 'libro'
     nuevo_libro = Libro(
         codigo_inventario=codigo_inventario,
         isbn=isbn,
@@ -68,62 +73,20 @@ def agregar_libro(
     db.add(nuevo_libro)
     try:
         db.commit()
-    except IntegrityError:
+        db.refresh(nuevo_libro)
+        logger.info(f"Libro insertado correctamente (código: {codigo_inventario}).")
+    except IntegrityError as ie:
         db.rollback()
+        logger.error("Error al insertar el libro", exc_info=ie)
         raise HTTPException(status_code=500, detail="Error al insertar el libro")
     
-    db.refresh(nuevo_libro)
-    # Insertar la reseña en MongoDB si se proporcionó
+    # Si se recibe reseña, se guarda en MongoDB y se asigna al atributo 'resena'
     if resena:
-        insert_review("libro", codigo_inventario, resena)
-    # Leer la reseña de MongoDB para adjuntarla en la respuesta
-    mongo_resena = get_review("libro", codigo_inventario)
-    libro_dict = nuevo_libro.__dict__
-    libro_dict["resena"] = mongo_resena
-    return libro_dict
-
-@router.get("/", response_model=list[LibroResponse])
-def listar_libros(db: Session = Depends(get_db)):
-    """
-    Lista todos los libros con la información del material asociado,
-    incluyendo la reseña almacenada en MongoDB.
-    """
-    libros = db.query(Libro).options(joinedload(Libro.material)).all()
-    result = []
-    for libro in libros:
-        libro_dict = libro.__dict__
-        libro_dict["resena"] = get_review("libro", libro.codigo_inventario)
-        result.append(libro_dict)
-    return result
-
-@router.get("/{codigo_inventario}", response_model=LibroResponse)
-def obtener_libro(codigo_inventario: int, db: Session = Depends(get_db)):
-    """
-    Obtiene la información de un libro por su código de inventario,
-    incluyendo la reseña almacenada en MongoDB.
-    """
-    libro = db.query(Libro).options(joinedload(Libro.material))\
-                         .filter_by(codigo_inventario=codigo_inventario).first()
-    if not libro:
-        raise HTTPException(status_code=404, detail="Libro no encontrado")
-    libro_dict = libro.__dict__
-    libro_dict["resena"] = get_review("libro", codigo_inventario)
-    return libro_dict
-
-@router.delete("/{codigo_inventario}")
-def eliminar_libro(codigo_inventario: int, db: Session = Depends(get_db)):
-    """
-    Elimina un libro y su registro asociado en MaterialBiblioteca,
-    además elimina la reseña en MongoDB.
-    """
-    libro = db.query(Libro).filter_by(codigo_inventario=codigo_inventario).first()
-    if not libro:
-        raise HTTPException(status_code=404, detail="Libro no encontrado")
+        insert_result = insert_review("libro", codigo_inventario, resena)
+        logger.info(f"Reseña insertada en MongoDB, id: {insert_result.inserted_id}")
     
-    material = libro.material
-    if material:
-        db.delete(material)
-    db.delete(libro)
-    db.commit()
-    delete_review("libro", codigo_inventario)
-    return {"message": "Libro y registro de material eliminado exitosamente"}
+    # Asigna la reseña obtenida de MongoDB al objeto
+    nuevo_libro.resena = get_review("libro", codigo_inventario)
+    
+    # Retorno el objeto; el response_model se encargará de convertirlo
+    return nuevo_libro
