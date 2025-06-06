@@ -8,12 +8,13 @@ from dotenv import load_dotenv
 # Cargar variables de entorno
 load_dotenv()
 
-# Obtener la ruta del directorio actual de este archivo (debería ser "C:\americo\API\sigesbi_api")
+# Obtener la ruta del directorio actual de este archivo
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-print(f"BASE_DIR: {BASE_DIR}")  # Esto ayudará a confirmar la ruta.
+print(f"BASE_DIR: {BASE_DIR}")  # Para depuración
+
 # Construir la ruta de la base de datos dentro de sigesbi_api
 db_path = os.path.join(BASE_DIR, "sigesbi.db")
-# Establecer DATABASE_URL: si no se establece en el .env, utiliza el valor por defecto con la ruta correcta
+# Si la variable DATABASE_URL no está establecida en .env, se utiliza la ruta construida
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{db_path}")
 
 engine = create_engine(DATABASE_URL, echo=False, future=True)

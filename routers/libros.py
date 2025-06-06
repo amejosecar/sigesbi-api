@@ -57,7 +57,7 @@ def agregar_libro(
     if libro_existente:
         raise HTTPException(status_code=409, detail="Ya existe un libro con ese código de inventario")
     
-    # Crear el registro en 'libro'
+    # Crear el registro en Libro
     nuevo_libro = Libro(
         codigo_inventario=codigo_inventario,
         isbn=isbn,
@@ -80,13 +80,38 @@ def agregar_libro(
         logger.error("Error al insertar el libro", exc_info=ie)
         raise HTTPException(status_code=500, detail="Error al insertar el libro")
     
-    # Si se recibe reseña, se guarda en MongoDB y se asigna al atributo 'resena'
+    # Operación en MongoDB: insertar y luego obtener la reseña
     if resena:
-        insert_result = insert_review("libro", codigo_inventario, resena)
-        logger.info(f"Reseña insertada en MongoDB, id: {insert_result.inserted_id}")
-    
-    # Asigna la reseña obtenida de MongoDB al objeto
+        insert_review("libro", codigo_inventario, resena)
     nuevo_libro.resena = get_review("libro", codigo_inventario)
     
-    # Retorno el objeto; el response_model se encargará de convertirlo
     return nuevo_libro
+
+@router.get("/", response_model=list[LibroResponse])
+def listar_libros(db: Session = Depends(get_db)):
+    libros = db.query(Libro).options(joinedload(Libro.material)).all()
+    for libro in libros:
+        libro.resena = get_review("libro", libro.codigo_inventario)
+    return libros
+
+@router.get("/{codigo_inventario}", response_model=LibroResponse)
+def obtener_libro(codigo_inventario: int, db: Session = Depends(get_db)):
+    libro = db.query(Libro).options(joinedload(Libro.material))\
+                         .filter_by(codigo_inventario=codigo_inventario).first()
+    if not libro:
+        raise HTTPException(status_code=404, detail="Libro no encontrado")
+    libro.resena = get_review("libro", codigo_inventario)
+    return libro
+
+@router.delete("/{codigo_inventario}")
+def eliminar_libro(codigo_inventario: int, db: Session = Depends(get_db)):
+    libro = db.query(Libro).filter_by(codigo_inventario=codigo_inventario).first()
+    if not libro:
+        raise HTTPException(status_code=404, detail="Libro no encontrado")
+    material = libro.material
+    if material:
+        db.delete(material)
+    db.delete(libro)
+    db.commit()
+    delete_review("libro", codigo_inventario)
+    return {"message": "Libro y registro de material eliminado exitosamente"}
